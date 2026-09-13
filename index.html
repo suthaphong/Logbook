@@ -194,7 +194,7 @@
 
   // Sorting State
   var currentSortField = "date";
-  var currentSortDirection = "desc"; // 'asc' or 'desc'
+  var currentSortDirection = "desc";
 
   var procs = {
     "1. Pleura, Chest wall, Mediastinum, Pericardial": [
@@ -440,27 +440,6 @@
     document.getElementById("sort-staff-icon").textContent = (currentSortField === "staff") ? arrow : "";
   }
 
-  function sortCases(cases) {
-    return cases.slice().sort(function(a, b) {
-      var valA = "";
-      var valB = "";
-
-      if (currentSortField === "date") {
-        valA = a.date || "";
-        valB = b.date || "";
-      } else if (currentSortField === "cat") {
-        valA = (a.cat || "") + " " + (a.op || "");
-        valB = (b.cat || "") + " " + (b.op || "");
-      } else if (currentSortField === "staff") {
-        valA = a.staff || "";
-        valB = b.staff || "";
-      }
-
-      var cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: "base" });
-      return (currentSortDirection === "asc") ? cmp : -cmp;
-    });
-  }
-
   function syncToGoogleSheet(caseData) {
     var webhookUrl = getActiveUrl();
     var statusEl = document.getElementById("syncStatus");
@@ -472,11 +451,15 @@
     fetch(webhookUrl, {
       method: "POST",
       mode: "no-cors",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(caseData)
     }).then(function() {
-      statusEl.textContent = "Sync: Case saved to Google Sheet!";
+      statusEl.textContent = "Sync: Saved! Auto-refreshing IDs...";
       statusEl.style.color = "#059669";
+      // Auto-pull in background so this new case gets its sheetRow immediately
+      setTimeout(function() {
+        pullFromGoogleSheet(true);
+      }, 1500);
     }).catch(function() {
       statusEl.textContent = "Sync: Saved locally (Sheet offline)";
       statusEl.style.color = "#dc2626";
@@ -487,13 +470,17 @@
     var webhookUrl = getActiveUrl();
     var statusEl = document.getElementById("syncStatus");
     if (!webhookUrl) {
-      statusEl.textContent = "Status: Set URL first.";
-      statusEl.style.color = "#d97706";
+      if (!isSilent) {
+        statusEl.textContent = "Status: Set URL first.";
+        statusEl.style.color = "#d97706";
+      }
       return;
     }
 
-    statusEl.textContent = "Sync: Pulling cases...";
-    statusEl.style.color = "#0284c7";
+    if (!isSilent) {
+      statusEl.textContent = "Sync: Pulling cases...";
+      statusEl.style.color = "#0284c7";
+    }
 
     fetch(webhookUrl)
       .then(function(res) { return res.json(); })
@@ -506,8 +493,10 @@
         }
       })
       .catch(function(err) {
-        statusEl.textContent = "Status: Ready (Local active)";
-        statusEl.style.color = "#059669";
+        if (!isSilent) {
+          statusEl.textContent = "Status: Ready (Local active)";
+          statusEl.style.color = "#059669";
+        }
       });
   }
 
@@ -519,12 +508,11 @@
 
     updateSortIcons();
 
-    // Map items with original index to preserve edit/delete accuracy
+    // Map items with original index to preserve edit/delete targeting
     var indexedList = originalList.map(function(item, idx) {
       return { item: item, originalIndex: idx };
     });
 
-    // Apply sorting
     indexedList.sort(function(a, b) {
       var valA = "";
       var valB = "";
@@ -627,32 +615,47 @@
     initCategories();
   }
 
+  // --- BULLETPROOF DELETE FUNCTION ---
   function delItem(idx) {
-    var list = getCases();
-    var item = list[idx];
+    var originalList = getCases();
+    var item = originalList[idx];
     if (!item) return;
 
-    if (!confirm("Are you sure you want to delete this case? (This will also clear the row in your Google Sheet)")) return;
+    if (!confirm("Delete this case? (This will also clear the row in your Google Sheet)")) return;
 
     var webhookUrl = getActiveUrl();
-    if (webhookUrl && item.sheetRow && item.sheetName) {
+    if (webhookUrl) {
+      var statusEl = document.getElementById("syncStatus");
+      if (statusEl) {
+        statusEl.textContent = "Sync: Deleting from Sheet...";
+        statusEl.style.color = "#0284c7";
+      }
+
+      // Always send the delete request, passing fallback data if sheetRow is empty
       fetch(webhookUrl, {
         method: "POST",
         mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({
           action: "delete",
-          sheetRow: item.sheetRow,
-          sheetName: item.sheetName,
-          cat: item.cat
+          sheetRow: item.sheetRow || "",
+          sheetName: item.sheetName || "",
+          cat: item.cat || "",
+          hn: item.hn || "",
+          date: item.date || ""
         })
+      }).then(function() {
+        if (statusEl) {
+          statusEl.textContent = "Sync: Deleted from Sheet!";
+          statusEl.style.color = "#059669";
+        }
       }).catch(function(err) {
         console.error("Sheet delete error:", err);
       });
     }
 
-    list.splice(idx, 1);
-    saveCases(list);
+    originalList.splice(idx, 1);
+    saveCases(originalList);
     renderList();
   }
 
@@ -724,3 +727,4 @@
 
 </body>
 </html>
+
