@@ -1,9 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CVT Logbook</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 16px; }
+    .card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 20px; border: 1px solid #cbd5e1; }
+    h2, h3 { color: #1e3a8a; margin-top: 0; }
+    .field { margin-bottom: 12px; }
+    label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; }
+    input, select { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; }
+    .badge { display: inline-block; padding: 2px 6px; font-size: 0.75rem; border-radius: 4px; font-weight: 600; margin-right: 4px; }
+    .badge-pri { background: #dbeafe; color: #1e40af; }
+    .badge-sec { background: #fef3c7; color: #92400e; }
+    .sync-status { font-size: 0.85rem; margin-top: 8px; font-weight: 600; }
+    .btn-row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    button { background: #1e3a8a; color: #fff; border: none; padding: 10px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    button.sec { background: #475569; }
+    button.sync { background: #0284c7; }
+    button.save-url { background: #059669; }
+    button.cancel { background: #64748b; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; }
+    .action-btns { display: flex; gap: 4px; }
+    .btn-edit { background: #0284c7; padding: 4px 8px; font-size: 0.75rem; }
+    .btn-del { background: #dc2626; padding: 4px 8px; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+
+<!-- Cloud Sync Setup Card -->
+<div class="card" style="border-left: 4px solid #0284c7;">
+  <h3 style="margin: 0; font-size: 1rem; color: #0369a1;">Google Sheet Cloud Sync</h3>
+  
+  <div style="margin-top: 10px;">
+    <label>Google Apps Script Web App URL (/exec)</label>
+    <input type="text" id="webhookInput" placeholder="https://script.google.com/macros/s/.../exec">
+    <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+      <button type="button" class="save-url" onclick="handleSaveUrl()">Save URL</button>
+      <button type="button" class="sync" onclick="pullFromGoogleSheet(false)">Pull from Sheet</button>
+    </div>
+  </div>
+
+  <div id="syncStatus" class="sync-status" style="color: #d97706;">Status: Checking...</div>
+</div>
+
+<div class="card" id="formCard">
+  <h2 id="formTitle">Record Surgical Case</h2>
+  <form id="caseForm">
+    <input type="hidden" id="editIndex" value="-1">
+
+    <div class="field">
+      <label>Date (วดป.)</label>
+      <input type="date" id="caseDate" required>
+    </div>
+    <div class="field">
+      <label>HN</label>
+      <input type="text" id="hn" placeholder="e.g. 1234567" required>
+    </div>
+    <div class="field">
+      <label>AN (Optional)</label>
+      <input type="text" id="an" placeholder="e.g. 6900123">
+    </div>
+    <div class="field">
+      <label>Patient Name (ชื่อ-สกุล)</label>
+      <input type="text" id="patientName" placeholder="Patient initials or name" required>
+    </div>
+    <div class="field">
+      <label>Age (อายุ)</label>
+      <input type="number" id="age" min="0" max="120" placeholder="Years" required>
+    </div>
+    <div class="field">
+      <label>Role</label>
+      <select id="role">
+        <option value="Surgeon (ทำเอง)">Surgeon (ทำเอง)</option>
+        <option value="Assistant (ช่วยผ่าตัด)">Assistant (ช่วยผ่าตัด)</option>
+      </select>
+    </div>
+
+    <!-- Primary Category & Procedure -->
+    <div class="field">
+      <label>Primary Board Category (หมวดหลัก)</label>
+      <select id="category" onchange="loadProcedures('primary')"></select>
+    </div>
+    <div class="field">
+      <label>Standard Procedure (EPA / Milestone)</label>
+      <select id="procSelect" onchange="handleProcChange('primary')"></select>
+    </div>
+    <div class="field" id="customProcDiv" style="display:none;">
+      <label style="color:#b45309;">Custom / Complex Procedure Detail</label>
+      <input type="text" id="customProcName" placeholder="Specify custom procedure...">
+    </div>
+
+    <!-- Optional Secondary Category -->
+    <div class="field" style="margin-top: 16px; padding-top: 12px; border-top: 1px dashed #cbd5e1;">
+      <label>Secondary Category (หมวดรอง - Optional)</label>
+      <select id="secCategory" onchange="loadProcedures('secondary')">
+        <option value="">-- None (Single System) --</option>
+      </select>
+    </div>
+    <div class="field" id="secProcDiv" style="display:none;">
+      <label>Secondary Procedure</label>
+      <select id="secProcSelect" onchange="handleProcChange('secondary')"></select>
+    </div>
+    <div class="field" id="customSecProcDiv" style="display:none;">
+      <label style="color:#b45309;">Custom Secondary Procedure Detail</label>
+      <input type="text" id="customSecProcName" placeholder="Specify custom secondary procedure...">
+    </div>
+
+    <div class="field" style="margin-top: 16px; border-top: 1px solid #cbd5e1; padding-top: 12px;">
+      <label>Full Operation Title</label>
+      <input type="text" id="opName" placeholder="e.g. CABG x 3 with AVR" required>
+    </div>
+    <div class="field">
+      <label>Diagnosis</label>
+      <input type="text" id="diag" placeholder="Diagnosis" required>
+    </div>
+    <div class="field">
+      <label>Attending Staff</label>
+      <input type="text" id="staff" placeholder="Staff surgeon name" required>
+    </div>
+    <div class="field">
+      <label>Remarks / Intraoperative Details</label>
+      <input type="text" id="remarks" placeholder="Notes...">
+    </div>
+
+    <div class="btn-row">
+      <button type="submit" id="saveBtn">Save Case</button>
+      <button type="button" class="cancel" id="cancelBtn" style="display:none;" onclick="cancelEdit()">Cancel Edit</button>
+      <button type="button" class="sec" onclick="exportCSV()">Export CSV</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Logged Cases (<span id="count">0</span>)</h3>
+  <div style="overflow-x: auto;">
+    <table>
+      <thead>
+        <tr><th>Date</th><th>HN</th><th>Role</th><th>Categories</th><th>Operation / Notes</th><th>Staff</th><th>Action</th></tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+</div>
+
 <script>
   var STORAGE_KEY = "cvt_resident_permanent_data";
   var SHEET_URL_KEY = "cvt_sheet_webhook_url";
-  
-  // PASTE YOUR FULL WEB APP URL HERE (MUST END IN /exec):
-  var DEFAULT_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbz0mc78AR0JXlmPdax-DFWEG04dZwRmm7Am9GdqxuN5TV_8Z4VSnjCzU1wPaKmyzQge/exec";
 
   var procs = {
     "1. Pleura, Chest wall, Mediastinum, Pericardial": [
@@ -75,34 +221,38 @@
     ]
   };
 
-  function getActiveUrl() {
-    var stored = localStorage.getItem(SHEET_URL_KEY);
-    if (stored && stored.startsWith("http")) return stored;
-    if (DEFAULT_WEBHOOK_URL && DEFAULT_WEBHOOK_URL.startsWith("http") && DEFAULT_WEBHOOK_URL.indexOf("...") === -1) {
-      return DEFAULT_WEBHOOK_URL;
+  function handleSaveUrl() {
+    var val = document.getElementById("webhookInput").value.trim();
+    var statusEl = document.getElementById("syncStatus");
+    if (!val) {
+      statusEl.style.color = "#dc2626";
+      statusEl.textContent = "Please paste a URL ending in /exec";
+      return;
     }
-    return "";
+    localStorage.setItem(SHEET_URL_KEY, val);
+    statusEl.style.color = "#059669";
+    statusEl.textContent = "URL Saved! Connected to Sheet.";
+    pullFromGoogleSheet(true);
   }
 
   function checkSyncStatus() {
     var statusEl = document.getElementById("syncStatus");
-    if (!statusEl) return;
+    var input = document.getElementById("webhookInput");
+    var savedUrl = localStorage.getItem(SHEET_URL_KEY);
     
-    var url = getActiveUrl();
-    if (url) {
+    if (savedUrl && savedUrl.length > 10) {
+      if (input) input.value = savedUrl;
       statusEl.style.color = "#059669";
-      statusEl.textContent = "Ready to Sync (Connected)";
+      statusEl.textContent = "Status: Connected to Google Sheet";
     } else {
       statusEl.style.color = "#d97706";
-      statusEl.textContent = "Offline / Webhook URL not set in code";
+      statusEl.textContent = "Status: Offline (Paste your Web App URL and tap Save URL)";
     }
   }
 
   function initCategories() {
     var catSel = document.getElementById("category");
     var secCatSel = document.getElementById("secCategory");
-    if (!catSel || !secCatSel) return;
-    
     catSel.innerHTML = "";
     secCatSel.innerHTML = "<option value=''>-- None (Single System) --</option>";
 
@@ -125,7 +275,6 @@
     if (type === 'primary') {
       var cat = document.getElementById("category").value;
       var pSel = document.getElementById("procSelect");
-      if (!pSel) return;
       pSel.innerHTML = "";
       if (procs[cat]) {
         procs[cat].forEach(function(item) {
@@ -140,7 +289,6 @@
       var secCat = document.getElementById("secCategory").value;
       var secDiv = document.getElementById("secProcDiv");
       var secPSel = document.getElementById("secProcSelect");
-      if (!secDiv || !secPSel) return;
       if (!secCat) {
         secDiv.style.display = "none";
         document.getElementById("customSecProcDiv").style.display = "none";
@@ -164,7 +312,6 @@
     if (type === 'primary') {
       var val = document.getElementById("procSelect").value;
       var custDiv = document.getElementById("customProcDiv");
-      if (!custDiv) return;
       if (val.indexOf("Other") !== -1) {
         custDiv.style.display = "block";
       } else {
@@ -174,7 +321,6 @@
     } else {
       var secVal = document.getElementById("secProcSelect").value;
       var secCustDiv = document.getElementById("customSecProcDiv");
-      if (!secCustDiv) return;
       if (secVal && secVal.indexOf("Other") !== -1) {
         secCustDiv.style.display = "block";
       } else {
@@ -214,14 +360,12 @@
   }
 
   function syncToGoogleSheet(caseData) {
-    var webhookUrl = getActiveUrl();
+    var webhookUrl = localStorage.getItem(SHEET_URL_KEY);
+    var statusEl = document.getElementById("syncStatus");
     if (!webhookUrl) return;
 
-    var statusEl = document.getElementById("syncStatus");
-    if (statusEl) {
-      statusEl.textContent = "Sync: Uploading...";
-      statusEl.style.color = "#0284c7";
-    }
+    statusEl.textContent = "Sync: Uploading...";
+    statusEl.style.color = "#0284c7";
 
     fetch(webhookUrl, {
       method: "POST",
@@ -229,30 +373,25 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(caseData)
     }).then(function() {
-      if (statusEl) {
-        statusEl.textContent = "Sync: Case saved to Google Sheet!";
-        statusEl.style.color = "#059669";
-      }
+      statusEl.textContent = "Sync: Case saved to Google Sheet!";
+      statusEl.style.color = "#059669";
     }).catch(function() {
-      if (statusEl) {
-        statusEl.textContent = "Sync: Saved locally (Sheet offline).";
-        statusEl.style.color = "#dc2626";
-      }
+      statusEl.textContent = "Sync: Saved locally (Sheet offline)";
+      statusEl.style.color = "#dc2626";
     });
   }
 
   function pullFromGoogleSheet(isSilent) {
-    var webhookUrl = getActiveUrl();
+    var webhookUrl = localStorage.getItem(SHEET_URL_KEY);
+    var statusEl = document.getElementById("syncStatus");
     if (!webhookUrl) {
-      if (!isSilent) alert("Webhook URL not found in code.");
+      statusEl.textContent = "Status: Set URL first.";
+      statusEl.style.color = "#d97706";
       return;
     }
 
-    var statusEl = document.getElementById("syncStatus");
-    if (statusEl) {
-      statusEl.textContent = "Sync: Pulling cases...";
-      statusEl.style.color = "#0284c7";
-    }
+    statusEl.textContent = "Sync: Pulling cases...";
+    statusEl.style.color = "#0284c7";
 
     fetch(webhookUrl)
       .then(function(res) { return res.json(); })
@@ -260,24 +399,19 @@
         if (res.result === "success" && Array.isArray(res.data)) {
           saveCases(res.data);
           renderList();
-          if (statusEl) {
-            statusEl.textContent = "Ready (" + res.data.length + " cases in Sheet)";
-            statusEl.style.color = "#059669";
-          }
+          statusEl.textContent = "Status: Up to date (" + res.data.length + " cases)";
+          statusEl.style.color = "#059669";
         }
       })
       .catch(function(err) {
-        if (statusEl) {
-          statusEl.textContent = "Ready to Sync (Local active)";
-          statusEl.style.color = "#059669";
-        }
+        statusEl.textContent = "Status: Ready (Local active)";
+        statusEl.style.color = "#059669";
       });
   }
 
   function renderList() {
     var list = getCases();
     var tb = document.getElementById("tableBody");
-    if (!tb) return;
     tb.innerHTML = "";
     document.getElementById("count").textContent = list.length;
     list.forEach(function(item, idx) {
@@ -306,7 +440,7 @@
     if (!item) return;
 
     document.getElementById("editIndex").value = idx;
-    document.getElementById("formTitle").textContent = "Edit Case (แก้ไขเคส)";
+    document.getElementById("formTitle").textContent = "Edit Case";
     document.getElementById("saveBtn").textContent = "Update Case";
     document.getElementById("cancelBtn").style.display = "inline-block";
 
@@ -356,7 +490,7 @@
   }
 
   function delItem(idx) {
-    if (confirm("Delete this case from phone table?")) {
+    if (confirm("Delete this case from phone list?")) {
       var list = getCases();
       list.splice(idx, 1);
       saveCases(list);
@@ -366,49 +500,45 @@
 
   document.getElementById("caseForm").onsubmit = function(e) {
     e.preventDefault();
-    try {
-      var pVal = document.getElementById("procSelect").value;
-      var priProcFinal = (pVal.indexOf("Other") !== -1) ? document.getElementById("customProcName").value.trim() : pVal;
-      var secCat = document.getElementById("secCategory").value;
-      var sVal = document.getElementById("secProcSelect") ? document.getElementById("secProcSelect").value : "";
-      var secProcFinal = "";
-      if (secCat) {
-        secProcFinal = (sVal && sVal.indexOf("Other") !== -1) ? document.getElementById("customSecProcName").value.trim() : sVal;
-      }
-
-      var editIdx = parseInt(document.getElementById("editIndex").value, 10);
-      var list = getCases();
-
-      var caseData = {
-        date: document.getElementById("caseDate").value,
-        hn: document.getElementById("hn").value.trim(),
-        an: document.getElementById("an").value.trim(),
-        name: document.getElementById("patientName").value.trim(),
-        age: document.getElementById("age").value,
-        role: document.getElementById("role").value,
-        cat: document.getElementById("category").value,
-        priProc: priProcFinal,
-        secCat: secCat || "",
-        secProc: secProcFinal,
-        op: document.getElementById("opName").value.trim(),
-        diag: document.getElementById("diag").value.trim(),
-        staff: document.getElementById("staff").value.trim(),
-        remarks: document.getElementById("remarks").value.trim()
-      };
-
-      if (editIdx >= 0 && editIdx < list.length) {
-        list[editIdx] = caseData;
-      } else {
-        list.unshift(caseData);
-      }
-
-      saveCases(list);
-      renderList();
-      syncToGoogleSheet(caseData);
-      cancelEdit();
-    } catch(err) {
-      alert("Save error: " + err.message);
+    var pVal = document.getElementById("procSelect").value;
+    var priProcFinal = (pVal.indexOf("Other") !== -1) ? document.getElementById("customProcName").value.trim() : pVal;
+    var secCat = document.getElementById("secCategory").value;
+    var sVal = document.getElementById("secProcSelect") ? document.getElementById("secProcSelect").value : "";
+    var secProcFinal = "";
+    if (secCat) {
+      secProcFinal = (sVal && sVal.indexOf("Other") !== -1) ? document.getElementById("customSecProcName").value.trim() : sVal;
     }
+
+    var editIdx = parseInt(document.getElementById("editIndex").value, 10);
+    var list = getCases();
+
+    var caseData = {
+      date: document.getElementById("caseDate").value,
+      hn: document.getElementById("hn").value.trim(),
+      an: document.getElementById("an").value.trim(),
+      name: document.getElementById("patientName").value.trim(),
+      age: document.getElementById("age").value,
+      role: document.getElementById("role").value,
+      cat: document.getElementById("category").value,
+      priProc: priProcFinal,
+      secCat: secCat || "",
+      secProc: secProcFinal,
+      op: document.getElementById("opName").value.trim(),
+      diag: document.getElementById("diag").value.trim(),
+      staff: document.getElementById("staff").value.trim(),
+      remarks: document.getElementById("remarks").value.trim()
+    };
+
+    if (editIdx >= 0 && editIdx < list.length) {
+      list[editIdx] = caseData;
+    } else {
+      list.unshift(caseData);
+    }
+
+    saveCases(list);
+    renderList();
+    syncToGoogleSheet(caseData);
+    cancelEdit();
   };
 
   function exportCSV() {
@@ -420,56 +550,18 @@
     });
     var a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([out], { type: "text/csv;charset=utf-8;" }));
-    a.download = "CVT_MultiCategory_Logbook.csv";
+    a.download = "CVT_Logbook.csv";
     a.click();
-  }
-
-  function exportBackupJSON() {
-    var list = getCases();
-    if (!list.length) return alert("No cases to backup.");
-    var blob = new Blob([JSON.stringify(list, null, 2)], { type: "application/json" });
-    var a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "CVT_Logbook_Backup_" + new Date().toISOString().slice(0,10) + ".json";
-    a.click();
-  }
-
-  function triggerImport() {
-    document.getElementById("importFileInput").click();
-  }
-
-  function importBackupJSON(event) {
-    var file = event.target.files[0];
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      try {
-        var importedCases = JSON.parse(e.target.result);
-        if (!Array.isArray(importedCases)) throw new Error("Invalid structure");
-        if (confirm("Found " + importedCases.length + " cases. Replace current logbook?")) {
-          saveCases(importedCases);
-          renderList();
-        }
-      } catch (err) {
-        alert("Invalid JSON backup file.");
-      }
-    };
-    reader.readAsText(file);
-    event.target.value = "";
   }
 
   window.onload = function() {
-    try {
-      document.getElementById("caseDate").valueAsDate = new Date();
-      initCategories();
-      checkSyncStatus();
-      renderList();
-      if (getActiveUrl()) {
-        pullFromGoogleSheet(true);
-      }
-    } catch(err) {
-      console.error(err);
-    }
+    document.getElementById("caseDate").valueAsDate = new Date();
+    initCategories();
+    checkSyncStatus();
+    renderList();
   };
 </script>
+
+</body>
+</html>
 
