@@ -4,6 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CVT Logbook</title>
+
+  <!-- PWA & Mobile Web App Meta -->
+  <meta name="theme-color" content="#1e3a8a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CVT Logbook">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="https://img.icons8.com/color/192/stethoscope.png">
+
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 16px; }
     .card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 20px; border: 1px solid #cbd5e1; }
@@ -24,9 +34,14 @@
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
     th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
     th { background: #f1f5f9; }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { background: #e2e8f0; color: #1e3a8a; }
     .action-btns { display: flex; gap: 4px; }
     .btn-edit { background: #0284c7; padding: 4px 8px; font-size: 0.75rem; }
     .btn-del { background: #dc2626; padding: 4px 8px; font-size: 0.75rem; }
+    .sort-bar { display: flex; gap: 8px; align-items: center; margin-top: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+    .sort-bar select { width: auto; flex: 1; min-width: 140px; padding: 6px 8px; font-size: 0.85rem; }
+    .sort-btn { background: #0284c7; padding: 6px 10px; font-size: 0.85rem; border-radius: 6px; }
   </style>
 </head>
 <body>
@@ -50,7 +65,10 @@
 <div class="card" id="formCard">
   <h2 id="formTitle">Record Surgical Case</h2>
   <form id="caseForm">
+    <!-- Row Index Tracking for Clean Edits & Deletes -->
     <input type="hidden" id="editIndex" value="-1">
+    <input type="hidden" id="sheetRow" value="">
+    <input type="hidden" id="sheetName" value="">
 
     <div class="field">
       <label>Date (วดป.)</label>
@@ -136,11 +154,33 @@
 </div>
 
 <div class="card">
-  <h3>Logged Cases (<span id="count">0</span>)</h3>
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+    <h3 style="margin: 0;">Logged Cases (<span id="count">0</span>)</h3>
+  </div>
+
+  <!-- Sorting Controls -->
+  <div class="sort-bar">
+    <label style="margin: 0; font-size: 0.8rem;">Sort By:</label>
+    <select id="sortFieldSelect" onchange="changeSortField(this.value)">
+      <option value="date">Date (วดป.)</option>
+      <option value="cat">Type of Operation (Category)</option>
+      <option value="staff">Staff Name (อาจารย์)</option>
+    </select>
+    <button type="button" class="sort-btn" id="sortDirBtn" onclick="toggleSortDirection()">Sort: DESC ▼</button>
+  </div>
+
   <div style="overflow-x: auto;">
     <table>
       <thead>
-        <tr><th>Date</th><th>HN</th><th>Role</th><th>Categories</th><th>Operation / Notes</th><th>Staff</th><th>Action</th></tr>
+        <tr>
+          <th class="sortable" onclick="setSort('date')">Date <span id="sort-date-icon">▼</span></th>
+          <th>HN</th>
+          <th>Role</th>
+          <th class="sortable" onclick="setSort('cat')">Categories <span id="sort-cat-icon"></span></th>
+          <th>Operation / Notes</th>
+          <th class="sortable" onclick="setSort('staff')">Staff <span id="sort-staff-icon"></span></th>
+          <th>Action</th>
+        </tr>
       </thead>
       <tbody id="tableBody"></tbody>
     </table>
@@ -150,6 +190,11 @@
 <script>
   var STORAGE_KEY = "cvt_resident_permanent_data";
   var SHEET_URL_KEY = "cvt_sheet_webhook_url";
+  var DEFAULT_WEBHOOK_URL = "";
+
+  // Sorting State
+  var currentSortField = "date";
+  var currentSortDirection = "desc"; // 'asc' or 'desc'
 
   var procs = {
     "1. Pleura, Chest wall, Mediastinum, Pericardial": [
@@ -221,6 +266,12 @@
     ]
   };
 
+  function getActiveUrl() {
+    var stored = localStorage.getItem(SHEET_URL_KEY);
+    if (stored && stored.startsWith("http")) return stored;
+    return DEFAULT_WEBHOOK_URL;
+  }
+
   function handleSaveUrl() {
     var val = document.getElementById("webhookInput").value.trim();
     var statusEl = document.getElementById("syncStatus");
@@ -238,10 +289,10 @@
   function checkSyncStatus() {
     var statusEl = document.getElementById("syncStatus");
     var input = document.getElementById("webhookInput");
-    var savedUrl = localStorage.getItem(SHEET_URL_KEY);
+    var activeUrl = getActiveUrl();
     
-    if (savedUrl && savedUrl.length > 10) {
-      if (input) input.value = savedUrl;
+    if (activeUrl && activeUrl.length > 10) {
+      if (input) input.value = activeUrl;
       statusEl.style.color = "#059669";
       statusEl.textContent = "Status: Connected to Google Sheet";
     } else {
@@ -359,8 +410,59 @@
     } catch(e){}
   }
 
+  // --- SORTING HELPERS ---
+  function changeSortField(field) {
+    currentSortField = field;
+    renderList();
+  }
+
+  function toggleSortDirection() {
+    currentSortDirection = (currentSortDirection === "asc") ? "desc" : "asc";
+    renderList();
+  }
+
+  function setSort(field) {
+    if (currentSortField === field) {
+      currentSortDirection = (currentSortDirection === "asc") ? "desc" : "asc";
+    } else {
+      currentSortField = field;
+      currentSortDirection = "asc";
+    }
+    document.getElementById("sortFieldSelect").value = field;
+    renderList();
+  }
+
+  function updateSortIcons() {
+    var arrow = currentSortDirection === "asc" ? "▲" : "▼";
+    document.getElementById("sortDirBtn").textContent = "Sort: " + currentSortDirection.toUpperCase() + " " + arrow;
+    document.getElementById("sort-date-icon").textContent = (currentSortField === "date") ? arrow : "";
+    document.getElementById("sort-cat-icon").textContent = (currentSortField === "cat") ? arrow : "";
+    document.getElementById("sort-staff-icon").textContent = (currentSortField === "staff") ? arrow : "";
+  }
+
+  function sortCases(cases) {
+    return cases.slice().sort(function(a, b) {
+      var valA = "";
+      var valB = "";
+
+      if (currentSortField === "date") {
+        valA = a.date || "";
+        valB = b.date || "";
+      } else if (currentSortField === "cat") {
+        valA = (a.cat || "") + " " + (a.op || "");
+        valB = (b.cat || "") + " " + (b.op || "");
+      } else if (currentSortField === "staff") {
+        valA = a.staff || "";
+        valB = b.staff || "";
+      }
+
+      var cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: "base" });
+      return (currentSortDirection === "asc") ? cmp : -cmp;
+    });
+  }
+
   function syncToGoogleSheet(caseData) {
-    var webhookUrl = localStorage.getItem(SHEET_URL_KEY);
+    var webhookUrl = getActiveUrl();
     var statusEl = document.getElementById("syncStatus");
     if (!webhookUrl) return;
 
@@ -382,7 +484,7 @@
   }
 
   function pullFromGoogleSheet(isSilent) {
-    var webhookUrl = localStorage.getItem(SHEET_URL_KEY);
+    var webhookUrl = getActiveUrl();
     var statusEl = document.getElementById("syncStatus");
     if (!webhookUrl) {
       statusEl.textContent = "Status: Set URL first.";
@@ -410,11 +512,42 @@
   }
 
   function renderList() {
-    var list = getCases();
+    var originalList = getCases();
     var tb = document.getElementById("tableBody");
     tb.innerHTML = "";
-    document.getElementById("count").textContent = list.length;
-    list.forEach(function(item, idx) {
+    document.getElementById("count").textContent = originalList.length;
+
+    updateSortIcons();
+
+    // Map items with original index to preserve edit/delete accuracy
+    var indexedList = originalList.map(function(item, idx) {
+      return { item: item, originalIndex: idx };
+    });
+
+    // Apply sorting
+    indexedList.sort(function(a, b) {
+      var valA = "";
+      var valB = "";
+
+      if (currentSortField === "date") {
+        valA = a.item.date || "";
+        valB = b.item.date || "";
+      } else if (currentSortField === "cat") {
+        valA = (a.item.cat || "") + " " + (a.item.op || "");
+        valB = (b.item.cat || "") + " " + (b.item.op || "");
+      } else if (currentSortField === "staff") {
+        valA = a.item.staff || "";
+        valB = b.item.staff || "";
+      }
+
+      var cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: "base" });
+      return (currentSortDirection === "asc") ? cmp : -cmp;
+    });
+
+    indexedList.forEach(function(entry) {
+      var item = entry.item;
+      var origIdx = entry.originalIndex;
+
       var tr = document.createElement("tr");
       var catBadges = '<span class="badge badge-pri">Pri: ' + item.cat + '</span>';
       if (item.secCat) {
@@ -427,8 +560,8 @@
         '<td><strong>' + item.op + '</strong><br><small style="color:#64748b;">' + item.diag + (item.remarks ? ' | ' + item.remarks : '') + '</small></td>' +
         '<td>' + item.staff + '</td>' +
         '<td><div class="action-btns">' +
-        '<button class="btn-edit" onclick="editItem(' + idx + ')">Edit</button>' +
-        '<button class="btn-del" onclick="delItem(' + idx + ')">Del</button>' +
+        '<button class="btn-edit" onclick="editItem(' + origIdx + ')">Edit</button>' +
+        '<button class="btn-del" onclick="delItem(' + origIdx + ')">Del</button>' +
         '</div></td>';
       tb.appendChild(tr);
     });
@@ -440,6 +573,9 @@
     if (!item) return;
 
     document.getElementById("editIndex").value = idx;
+    document.getElementById("sheetRow").value = item.sheetRow || "";
+    document.getElementById("sheetName").value = item.sheetName || "";
+
     document.getElementById("formTitle").textContent = "Edit Case";
     document.getElementById("saveBtn").textContent = "Update Case";
     document.getElementById("cancelBtn").style.display = "inline-block";
@@ -479,6 +615,8 @@
   function cancelEdit() {
     document.getElementById("caseForm").reset();
     document.getElementById("editIndex").value = "-1";
+    document.getElementById("sheetRow").value = "";
+    document.getElementById("sheetName").value = "";
     document.getElementById("formTitle").textContent = "Record Surgical Case";
     document.getElementById("saveBtn").textContent = "Save Case";
     document.getElementById("cancelBtn").style.display = "none";
@@ -490,12 +628,32 @@
   }
 
   function delItem(idx) {
-    if (confirm("Delete this case from phone list?")) {
-      var list = getCases();
-      list.splice(idx, 1);
-      saveCases(list);
-      renderList();
+    var list = getCases();
+    var item = list[idx];
+    if (!item) return;
+
+    if (!confirm("Are you sure you want to delete this case? (This will also clear the row in your Google Sheet)")) return;
+
+    var webhookUrl = getActiveUrl();
+    if (webhookUrl && item.sheetRow && item.sheetName) {
+      fetch(webhookUrl, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete",
+          sheetRow: item.sheetRow,
+          sheetName: item.sheetName,
+          cat: item.cat
+        })
+      }).catch(function(err) {
+        console.error("Sheet delete error:", err);
+      });
     }
+
+    list.splice(idx, 1);
+    saveCases(list);
+    renderList();
   }
 
   document.getElementById("caseForm").onsubmit = function(e) {
@@ -513,6 +671,8 @@
     var list = getCases();
 
     var caseData = {
+      sheetRow: document.getElementById("sheetRow").value,
+      sheetName: document.getElementById("sheetName").value,
       date: document.getElementById("caseDate").value,
       hn: document.getElementById("hn").value.trim(),
       an: document.getElementById("an").value.trim(),
@@ -564,4 +724,3 @@
 
 </body>
 </html>
-
