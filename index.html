@@ -156,8 +156,11 @@ th { background: #f1f5f9; }
 </div>
 
 <script>
-var STORAGE_KEY = "cvt_resident_permanent_data";
-var SHEET_URL_KEY = "cvt_sheet_webhook_url";
+  var STORAGE_KEY = "cvt_resident_permanent_data";
+  var SHEET_URL_KEY = "cvt_sheet_webhook_url";
+  // Paste your Apps Script Web App URL below:
+  var DEFAULT_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwG_Nb6I03WupFy5D1-XDoZ4KZZFlkmuUGe4deBghHGSgQ39cIXmmgLi50v8o6nV4lP/exec";
+
 
 var procs = {
 "1. Pleura, Chest wall, Mediastinum, Pericardial": [
@@ -249,23 +252,27 @@ alert("Please paste a valid URL.");
 }
 }
 
-function checkSyncStatus() {
-var url = localStorage.getItem(SHEET_URL_KEY);
-var statusEl = document.getElementById("syncStatus");
-var input = document.getElementById("sheetUrlInput");
-if (url) {
-if (input) input.value = url;
-if (statusEl) {
-statusEl.style.color = "#0284c7";
-statusEl.textContent = "Ready to Sync";
-}
-} else {
-if (statusEl) {
-statusEl.style.color = "#d97706";
-statusEl.textContent = "Offline / Local Only (Paste URL above)";
-}
-}
-}
+  function checkSyncStatus() {
+    var url = localStorage.getItem(SHEET_URL_KEY) || DEFAULT_WEBHOOK_URL;
+    if (!localStorage.getItem(SHEET_URL_KEY) && DEFAULT_WEBHOOK_URL) {
+      try { localStorage.setItem(SHEET_URL_KEY, DEFAULT_WEBHOOK_URL); } catch(e){}
+    }
+    var statusEl = document.getElementById("syncStatus");
+    var input = document.getElementById("sheetUrlInput");
+    if (url && url !== "https://script.google.com/macros/s/YOUR_APPS_SCRIPT_ID/exec") {
+      if (input) input.value = url;
+      if (statusEl) {
+        statusEl.style.color = "#059669";
+        statusEl.textContent = "Ready to Sync (Connected)";
+      }
+    } else {
+      if (statusEl) {
+        statusEl.style.color = "#d97706";
+        statusEl.textContent = "Offline / Local Only (Set URL in code)";
+      }
+    }
+  }
+
 
 function initCategories() {
 var catSel = document.getElementById("category");
